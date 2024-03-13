@@ -1,58 +1,156 @@
+// app.js
 const express = require("express");
+const morgan = require("morgan");
+const bodyParser = require("body-parser");
+const cors = require("cors");
+const multer = require("multer");
+const fs = require("fs");
+const path = require("path");
+const users = require("./users");
+const db = require("./db");
+
 const app = express();
 const port = 3000;
 
-app.get("/", (req, res) =>
-  res.json({
-    status: "success",
-    message: "Hello World",
-  })
-);
+// Middlewares
+app.use(morgan("dev"));
+app.use(bodyParser.json());
+app.use(cors({ origin: "http://127.0.0.1:5500" }));
+app.use(express.static("public"));
 
-app.post("/contoh", (req, res) =>
-  res.json({
-    status: "success",
-    message: "request dengan method POST",
-  })
-);
+// Setup storage for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "./uploads"); // Set destination folder
+  },
+  filename: function (req, file, cb) {
+    cb(null, file.fieldname + "-" + Date.now() + file.originalname);
+  },
+});
+const upload = multer({ storage: storage });
 
-app.put("/contoh", (req, res) =>
-  res.json({
-    status: "success",
-    message: "Request dengan method PUT",
-  })
-);
+// Routes
+// GET: /users
+app.get("/users", (req, res) => {
+  res.json(users);
+});
 
-app.patch("/contoh", (req, res) =>
-  res.json({
-    status: "success",
-    message: "Request dengan method PATCH",
-  })
-);
+// GET: /users/:name
+app.get("/users/:name", (req, res) => {
+  const userName = req.params.name.toLowerCase();
+  const user = users.find((u) => u.name.toLowerCase() === userName);
+  if (!user) {
+    return res
+      .status(404)
+      .json({ status: "error", message: "Data user tidak ditemukan" });
+  }
+  res.json(user);
+});
 
-app.delete("/contoh", (req, res) =>
-  res.json({
+app.get("/students", async (req, res) => {
+  try {
+    const result = await db.query("SELECT * FROM students");
+    res.status(200).json({
+      status: "success",
+      data: result.rows,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+app.post("/students", async (req, res) => {
+  const { name, address } = req.body;
+  try {
+    const result = await db.query(
+      `INSERT into students (name, address) values ('${name}', '${address}')`
+    );
+    res.status(200).json({
+      status: "success",
+      message: "data berhasil dimasukan",
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+// POST: /users
+app.post("/users", (req, res) => {
+  const { id, name } = req.body;
+  if (!id || !name) {
+    return res.status(400).json({
+      status: "error",
+      message: "masukkan data yang akan diubah",
+    });
+  }
+  const newUser = {
+    id,
+    name,
+  };
+  users.push(newUser);
+
+  res.status(201).json({
     status: "success",
-    message: "request dengan method DELETE",
-  })
-);
-//Params
-app.get("/post/:id", (req, res) => {
-  const id = req.params.id;
-  res.json({
-    status: "success",
-    message: `Artikel ID ke-${id}`,
+    data: newUser,
   });
 });
 
-app.get("/post", (req, res) => {
-  const { page, sort } = req.query;
-  res.json({
-    status: "success",
-    message: `Page = ${page}, Sort by = ${sort}`,
-  });
+// POST: /upload
+app.post("/upload", upload.single("file"), (req, res) => {
+  if (req.file) {
+    res.send("File uploaded successfully");
+  } else {
+    res.send("Error uploading file");
+  }
 });
 
-app.listen(port, () =>
-  console.log(`Server running at http://localhost:${port}`)
-);
+app.put("/users/:name", (req, res) => {
+  const { name } = req.params;
+  const { newName } = req.body;
+  if (!newName) {
+    return res
+      .status(400)
+      .json({ status: "error", message: "Masukan data yang akan di input" });
+  }
+  const userIndex = users.findIndex(
+    (u) => u.name.toLowerCase() === name.toLowerCase()
+  );
+  if (userIndex === -1) {
+    return res
+      .status(404)
+      .json({ status: "error", message: "Data user tidak ditemukan" });
+  }
+  users[userIndex].name = newName;
+  res.json(users[userIndex]);
+});
+
+// app.delete('/users/:name', (req, res) => {
+//   const { name } = req.params;
+//   const index = users.findIndex(u => u.name.toLowerCase() === name.toLowerCase());
+//   if (index === -1) {
+//     return res.status(404).json({ status: "error", message: "Data user tidak ditemukan" });
+//   }
+//   users.splice(index, 1);
+//   res.status(204).json({ status: "success", message: "Data user berhasil dihapus" });
+// });
+
+// 404 Route
+app.use((req, res) => {
+  res
+    .status(404)
+    .json({ status: "error", message: "resource tidak ditemukan" });
+});
+
+// Error handling Middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res
+    .status(500)
+    .json({ status: "error", message: "terjadi kesalahan pada server" });
+});
+
+app.listen(port, () => {
+  console.log(`Server running at http://localhost:${port}`);
+});
